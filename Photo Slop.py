@@ -3,6 +3,8 @@ import ast                            # safely reads the file's header text as a
 import urllib.request                 # downloads files from a web address
 import numpy as np                    # works with big grids of numbers (our doodles)
 import matplotlib.pyplot as plt       # draws pictures and charts
+from sklearn.model_selection import train_test_split   # splits data into train/test
+from sklearn.metrics import confusion_matrix           # counts which animals get mixed up
 
 # --- Settings you can change ---
 categories = ["cat", "dog", "horse", "cow"]   # the animals to download (lowercase, must match Quick, Draw! names)
@@ -56,3 +58,47 @@ for row, c in enumerate(categories):
 plt.tight_layout()                              # stop the plots from overlapping
 plt.savefig("sample_doodles.png", dpi=150)      # save the picture as a file for your report
 plt.show()                                      # also display it on screen
+
+# --- Step 3: split the data into training and test sets ---
+# Combine all animals into one big array.
+# Pixel values are scaled from 0-255 down to 0-1, and each doodle gets a label number (0 = cat, 1 = dog, ...)
+X = np.concatenate([datasets[c] for c in categories]).astype("float32") / 255.0
+y = np.concatenate([np.full(len(datasets[c]), i) for i, c in enumerate(categories)])
+
+# Keep 80% for training and set aside 20% for testing.
+# stratify=y keeps the animals evenly balanced in both groups; random_state makes the split repeatable.
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, stratify=y, random_state=42)
+print("train:", X_train.shape, " test:", X_test.shape)
+
+# --- Step 4: template-matching baseline ---
+# Build one "template" per animal by averaging all of its training doodles
+templates = np.stack([X_train[y_train == i].mean(axis=0) for i in range(len(categories))])
+
+# For each test doodle, measure how far it is from each template (smaller = more similar),
+# then guess the animal whose template is closest
+dists = ((X_test[:, None, :] - templates[None, :, :]) ** 2).sum(axis=2)
+predictions = dists.argmin(axis=1)
+
+# Score the guesses against the true answers
+accuracy = (predictions == y_test).mean()                                             # exactly right
+top3 = (np.argsort(dists, axis=1)[:, :3] == y_test[:, None]).any(axis=1).mean()       # right answer in best 3
+print(f"Template matching accuracy: {accuracy:.1%}")
+print(f"Template matching top-3 accuracy: {top3:.1%}")
+
+# --- Step 5: draw the templates and a confusion matrix, then save the picture ---
+cm = confusion_matrix(y_test, predictions, normalize="true")   # each row: where that animal's doodles went
+fig, axes = plt.subplots(1, len(categories) + 1, figsize=(15, 3))
+for i, c in enumerate(categories):
+    axes[i].imshow(templates[i].reshape(28, 28), cmap="gray_r")
+    axes[i].set_title(f"{c} template")
+    axes[i].axis("off")
+axes[-1].imshow(cm, cmap="Blues", vmin=0, vmax=1)
+axes[-1].set_xticks(range(len(categories)), categories, rotation=45)
+axes[-1].set_yticks(range(len(categories)), categories)
+axes[-1].set_xlabel("Predicted")
+axes[-1].set_ylabel("True")
+axes[-1].set_title("Confusion matrix")
+plt.tight_layout()
+plt.savefig("baseline_results.png", dpi=150)
+plt.show()
